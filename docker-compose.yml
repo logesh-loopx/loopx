@@ -1,0 +1,17 @@
+# Local run:  docker compose up --build   then open http://localhost:8000
+services:
+  loopx:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Local defaults (a .env file overrides them)
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8000}
+      SEED_DEMO: ${SEED_DEMO:-true}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-console}
+    volumes:
+      - ./data:/app/data   # SQLite database and the console outbox live here
+    restart: unless-stopped

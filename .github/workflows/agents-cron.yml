@@ -1,0 +1,22 @@
+# Wakes the free hosted LOOPX server every 10 minutes and runs the five agents.
+# Set two repository secrets (Settings > Secrets and variables > Actions):
+#   LOOPX_URL    e.g. https://loopx.onrender.com
+#   CRON_SECRET  the same value as the server's CRON_SECRET
+# GitHub may run scheduled jobs a few minutes late; cron-job.org is an alternative.
+name: Run LOOPX agents
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    if: ${{ vars.LOOPX_CRON_ENABLED == 'true' }}
+    steps:
+      - name: Call /cron/tick
+        env:
+          LOOPX_URL: ${{ secrets.LOOPX_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -fsS --retry 3 --retry-delay 20 --max-time 120 \
+            -H "X-Cron-Secret: ${CRON_SECRET}" "${LOOPX_URL%/}/cron/tick" | head -c 600

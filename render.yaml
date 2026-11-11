@@ -1,0 +1,41 @@
+# Render Blueprint: free web service. Render > New > Blueprint > pick this repo.
+# The free instance sleeps after ~15 minutes without traffic; the GitHub Action in
+# .github/workflows/agents-cron.yml (or cron-job.org) calls /cron/tick every 10 minutes,
+# which wakes it and runs the agents.
+services:
+  - type: web
+    name: loopx
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL        # Neon Postgres connection string
+        sync: false
+      - key: PUBLIC_URL          # e.g. https://loopx.onrender.com
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CRON_SECRET
+        generateValue: true
+      - key: MAIL_PROVIDER
+        value: brevo             # free hosts block SMTP ports; Brevo sends over HTTPS
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM           # a sender you verified in Brevo
+        sync: false
+      - key: REPLY_TO
+        sync: false
+      - key: IMAP_HOST
+        sync: false
+      - key: IMAP_USER
+        sync: false
+      - key: IMAP_PASSWORD
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ALLOW_SIGNUP
+        value: "true"
+      - key: SEED_DEMO
+        value: "false"
+      - key: DAILY_SEND_LIMIT
+        value: "300"
