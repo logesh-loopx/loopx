@@ -78,20 +78,38 @@ def strip_quoted(body: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).strip()[:4000]
 
 
-def fetch_unseen(ws, limit: int = 100) -> list[InboundMail]:
+BOUNCE_SENDERS = ("mailer-daemon", "postmaster", "mail-daemon", "bounce")
+
+
+def fetch_unseen(ws, allow=None, limit: int = 100, days: int = 14) -> list[InboundMail]:
+    """Read unread mail from the last `days` days.
+
+    Only messages for which allow(from_email) is True (customers, bounce notices) are read
+    and marked as read. Everything else in the mailbox is left untouched and unread, so a
+    personal inbox can double as the reply-to inbox.
+    """
+    import datetime as _dt
     c = imap_config(ws)
     out: list[InboundMail] = []
+    since = (_dt.date.today() - _dt.timedelta(days=days)).strftime("%d-%b-%Y")
     with imaplib.IMAP4_SSL(c["host"], timeout=30) as M:
         M.login(c["user"], c["password"])
         M.select(c["folder"])
-        _, data = M.search(None, "UNSEEN")
-        for num in data[0].split()[-limit:]:
-            _, d = M.fetch(num, "(RFC822)")  # marks as seen
+        _, data = M.search(None, "UNSEEN", "SINCE", since)
+        for num in data[0].split()[-limit * 5:]:
+            _, h = M.fetch(num, "(BODY.PEEK[HEADER.FIELDS (FROM)])")  # PEEK: does not mark as read
+            raw = h[0][1] if h and isinstance(h[0], tuple) else b""
+            _, addr = parseaddr(_dec(email.message_from_bytes(raw).get("From")))
+            addr = addr.lower()
+            if allow is not None and not allow(addr):
+                continue
+            _, d = M.fetch(num, "(BODY.PEEK[])")
+            M.store(num, "+FLAGS", "\\Seen")
             msg = email.message_from_bytes(d[0][1])
             name, addr = parseaddr(_dec(msg.get("From")))
             try:
                 dt = parsedate_to_datetime(msg.get("Date"))
-                dt = dt.astimezone(tz=__import__("datetime").timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+                dt = dt.astimezone(tz=_dt.timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
             except Exception:
                 dt = None
             auto = bool(msg.get("Auto-Submitted", "no").lower() not in ("no", "")) or bool(msg.get("X-Autoreply")) \
@@ -100,4 +118,6 @@ def fetch_unseen(ws, limit: int = 100) -> list[InboundMail]:
                                    from_email=addr.lower(), from_name=name, subject=_dec(msg.get("Subject")),
                                    body=_body(msg), received_at=dt, in_reply_to=(msg.get("In-Reply-To") or "").strip(),
                                    to=_dec(msg.get("To")), auto=auto))
+            if len(out) >= limit:
+                break
     return out

@@ -19,6 +19,14 @@ from ..config import settings
 from ..models import Contact, Event, Send, Workspace
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+RESERVED = ("example.com", "example.org", "example.net")
+RESERVED_TLDS = (".example", ".test", ".invalid", ".localhost", ".local")
+
+
+def undeliverable(email: str) -> bool:
+    """Reserved demo/test domains (RFC 2606) that can never receive mail."""
+    d = (email or "").rsplit("@", 1)[-1].lower()
+    return d in RESERVED or d.endswith(tuple("." + r for r in RESERVED)) or d.endswith(RESERVED_TLDS)
 
 
 def clean_email(e) -> str:

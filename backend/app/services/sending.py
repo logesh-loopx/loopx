@@ -48,6 +48,10 @@ def send_batch(ctx, plan: Plan, limit: int, wave_only: bool) -> int:
     n = 0
     for s in db.scalars(q.order_by(Send.scheduled_at, Send.id).limit(max(0, limit))):
         c = s.contact
+        from .ingest import undeliverable
+        if undeliverable(c.email):
+            s.status, s.hold_reason = "skipped", "Demo address, never emailed"
+            continue
         if not c.emailable:  # status changed after planning
             s.status, s.hold_reason = "skipped", "Contact no longer emailable"
             continue

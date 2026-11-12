@@ -90,13 +90,13 @@
 
   function render() {
     var box = document.getElementById('lxp');
-    var tabs = [['status', 'Status'], ['plan', "Today's plan"], ['sender', 'Sender'], ['inbox', 'Reply inbox'], ['stores', 'Store connectors'], ['api', 'Events API'], ['import', 'Import file'], ['reply', 'Test a reply'], ['team', 'Team']];
+    var tabs = [['status', 'Status'], ['office', 'Office test'], ['plan', "Today's plan"], ['sender', 'Sender'], ['inbox', 'Reply inbox'], ['stores', 'Store connectors'], ['api', 'Events API'], ['import', 'Import file'], ['reply', 'Test a reply'], ['team', 'Team']];
     box.innerHTML = '<header><h2>Connections</h2><button class="btn sec" id="lxp-x" style="margin:0">Close</button></header>' +
       '<div class="tabs">' + tabs.map(function (t) { return '<button class="tab' + (t[0] === tab ? ' on' : '') + '" data-t="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '</div>' +
       '<div class="body" id="lxp-body">Loading…</div>';
     box.querySelector('#lxp-x').onclick = close;
     Array.prototype.forEach.call(box.querySelectorAll('.tab'), function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); render(); }; });
-    ({ status: pStatus, plan: pPlan, sender: pSender, inbox: pInbox, stores: pStores, api: pApi, import: pImport, reply: pReply, team: pTeam })[tab]();
+    ({ status: pStatus, office: pOffice, plan: pPlan, sender: pSender, inbox: pInbox, stores: pStores, api: pApi, import: pImport, reply: pReply, team: pTeam })[tab]();
   }
   function body(h) { document.getElementById('lxp-body').innerHTML = h; }
 
@@ -122,6 +122,34 @@
         LX.api('POST', wsPath('/plan/build')).then(function (r) { say('lxp-m', 'Plan rebuilt: ' + esc(r.plan.status) + ', ' + (r.plan.summary.emails || 0) + ' emails.'); refreshConsole(); }, function (e) { say('lxp-m', e.message, 1); });
       };
     }, function (e) { body('<p class="err">' + esc(e.message) + '</p>'); });
+  }
+
+  function pOffice() {
+    LX.api('GET', '/health').then(function (H) {
+      var live = H.mail !== 'console';
+      body('<p>Add real people, such as colleagues who agreed to help, as test customers. Each one gets a purchase history that makes them due for a reminder <b>today</b>, so the Timing agent picks them, Writer fills their email, Guard sends a test wave, and Listener reads their replies. Test people are never put in the holdout group.</p>' +
+        (live ? '<p><span class="pill ok">Real sending is on (' + esc(H.mail) + ')</span> These people will really get an email after you approve the plan.</p>'
+              : '<p><span class="pill warn">Sending is off (console)</span> Emails are only saved to data/outbox. To really send, set MAIL_PROVIDER=smtp (or brevo) in .env and restart. See the steps from Claude.</p>') +
+        '<label>Email addresses (one per line, or "Name &lt;email&gt;")</label><textarea id="o-e" rows="6" placeholder="Priya Nair <priya@yourcompany.com>\nrahul@yourcompany.com"></textarea>' +
+        '<button class="btn" id="o-add">Add as test people</button><button class="btn sec" id="o-plan">Rebuild today\'s plan</button><div id="o-m"></div>' +
+        '<h3>Then</h3><ol><li>Click <b>Rebuild today\'s plan</b> (or wait for the next agent run).</li><li>In LOOPX go to <b>Today\'s plan</b> and click <b>Approve the plan</b>.</li><li>The test wave goes first. After WAVE_WAIT_MINUTES Guard checks it and sends the rest.</li><li>Ask a colleague to reply "please remove me" to see the Listener unsubscribe them (needs the Reply inbox set up).</li></ol>' +
+        '<p><small>Sample addresses at example.com are never emailed: Guard holds them.</small></p>');
+      document.getElementById('o-add').onclick = function () {
+        LX.api('POST', wsPath('/test-people'), { emails: val('o-e') }).then(function (r) {
+          var names = { wk: 'weekly', bi: 'every 14 days', mo: 'monthly' };
+          say('o-m', r.added.length ? 'Added ' + r.added.length + ': ' + r.added.map(function (a) { return a.email + ' (' + names[a.campaign] + ')'; }).join(', ') + '.' + (r.rejected.length ? ' Not added: ' + r.rejected.join(', ') + '.' : '') : 'Nobody added. ' + (r.rejected.length ? 'Not valid: ' + r.rejected.join(', ') : 'Paste at least one email address.'), !r.added.length);
+          refreshConsole();
+        }, function (e) { say('o-m', e.message, 1); });
+      };
+      document.getElementById('o-plan').onclick = function () {
+        LX.api('POST', wsPath('/plan/build')).then(function (r) {
+          var p = r.plan;
+          say('o-m', p.status === 'draft' ? "Today's plan now has " + (p.summary.emails || 0) + " emails waiting for approval. Go to Today's plan and approve it." :
+            p.status === 'done' ? 'No new people are due. Add test people first.' : "Today's plan is " + p.status + ". It can be rebuilt once it has finished sending.", p.status !== 'draft');
+          refreshConsole();
+        }, function (e) { say('o-m', e.message, 1); });
+      };
+    });
   }
 
   function pPlan() {

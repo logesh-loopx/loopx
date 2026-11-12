@@ -37,7 +37,14 @@ def build_plan(ctx: Ctx, day: date | None = None, force: bool = False) -> Plan:
     plan = db.scalar(select(Plan).where(Plan.workspace_id == ws.id, Plan.day == day))
     if plan and not force:
         return plan
-    if plan and force:
+    topup = False
+    if plan and force and plan.status == "done":
+        # Today's emails are out; add anyone who became due since (e.g. newly added test people).
+        topup = True
+        plan.status, plan.created_at, plan.wave_done_at = "draft", ctx.now, None
+        plan.approved_at, plan.approved_by = None, ""
+        db.flush()
+    elif plan and force:
         if plan.status not in ("draft", "empty"):
             return plan  # never rebuild a plan that is already sending
         db.query(Send).filter(Send.plan_id == plan.id).delete()
@@ -46,9 +53,10 @@ def build_plan(ctx: Ctx, day: date | None = None, force: bool = False) -> Plan:
                                   ).delete(synchronize_session=False)
         db.delete(plan)
         db.flush()
-    plan = Plan(workspace_id=ws.id, day=day, status="draft", created_at=ctx.now)
-    db.add(plan)
-    db.flush()
+    if not topup:
+        plan = Plan(workspace_id=ws.id, day=day, status="draft", created_at=ctx.now)
+        db.add(plan)
+        db.flush()
 
     if not is_on(ws, "timing"):
         plan.status, plan.summary = "empty", {"note": "The Timing agent is off or all agents are paused."}
@@ -68,6 +76,8 @@ def build_plan(ctx: Ctx, day: date | None = None, force: bool = False) -> Plan:
         p = r["pick"]
         tz = p.contact.tz if (per_customer_tz and p.contact.tz) else ctx.tz
         when = clock.to_utc_naive(day, p.hour, p.minute, tz)
+        if (p.contact.extra or {}).get("test"):
+            when = min(when, ctx.now)  # test people get their email as soon as the plan is approved
         status = "holdout" if p.holdout else r["status"]
         db.add(Send(workspace_id=ws.id, plan_id=plan.id, contact_id=p.contact.id, seg=p.seg, campaign=r["campaign"],
                     subject=r["subject"], variant=r["variant"], body_text=r["body"], status=status,
@@ -80,7 +90,7 @@ def build_plan(ctx: Ctx, day: date | None = None, force: bool = False) -> Plan:
                     "wave": gstats.get("wave", 0), "counts": counts, "writer": wstats, "guard": gstats,
                     "segs": _seg_counts(rows)}
     if not rows:
-        plan.status = "empty"
+        plan.status = "done" if topup else "empty"
         return plan
     if level_for(ws, "timing", "pick") == "auto":
         approve_plan(ctx, plan, "Timing agent (acts on its own)")

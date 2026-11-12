@@ -173,7 +173,7 @@ class TimingAgent:
             moved = ""
             if moving and a.seg in REMIND and a.due is not None and a.due > self.lead:
                 moved = hol_ahead[0] if hol_ahead else "the weekend"
-            picks.append(Pick(c, a, a.seg, h, m, in_holdout(c.id, day, hold_pct), due_date, moved))
+            picks.append(Pick(c, a, a.seg, h, m, in_holdout(c.id, day, hold_pct) and not (c.extra or {}).get("test"), due_date, moved))
 
         self._explain(picks, counts, low_examples, skip_examples, hol_ahead if moving else [], ahead)
         return picks, dict(counts)

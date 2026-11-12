@@ -88,8 +88,13 @@ class ListenerAgent:
         ws = self.ctx.ws
         if not inbox.configured(ws):
             return 0
+        known = set(self.ctx.db.scalars(select(Contact.email).where(Contact.workspace_id == ws.id)))
+
+        def allow(addr: str) -> bool:  # customers' replies and bounce notices only
+            return addr in known or any(b in addr for b in inbox.BOUNCE_SENDERS)
+
         try:
-            mails = inbox.fetch_unseen(ws)
+            mails = inbox.fetch_unseen(ws, allow=allow)
         except Exception as e:
             log.warning("IMAP read failed for workspace %s: %s", ws.id, e)
             self.ctx.set_state("imap_error", str(e)[:300])

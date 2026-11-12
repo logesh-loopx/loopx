@@ -34,7 +34,7 @@ def seed_demo(n: int = 400, seed: int = 7) -> int | None:
             return None
         ws = Workspace(name="Demo Store (local)", industry="store", theme="violet", playbook=demo_playbook(),
                        settings={"timezone": "Asia/Kolkata", "country": "IN", "website": "https://demo-store.example.com",
-                                 "from_name": "Demo Store", "reply_to": "replies@demo-store.example.com"})
+                                 "from_name": "Demo Store"})
         db.add(ws)
         db.flush()
         rnd = random.Random(seed)

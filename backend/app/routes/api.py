@@ -297,6 +297,59 @@ async def import_csv(ws_id: int, request: Request, user: User = Depends(auth.cur
     return res
 
 
+@router.post("/workspaces/{ws_id}/test-people")
+def add_test_people(ws_id: int, body: dict = Body(...), user: User = Depends(auth.current_user), db: Session = Depends(get_db)):
+    """Add real people (e.g. colleagues) as test customers who are due for a reminder today.
+
+    Each gets a purchase history that puts them in a reminder campaign now (weekly, every 14 days
+    or monthly, in turn), is tagged "test" and is never put in the holdout group.
+    """
+    import re as _re
+    auth.require(user, "edit")
+    ws = _ws(db, ws_id)
+    raw = body.get("emails") or ""
+    items = []
+    for part in (raw if isinstance(raw, list) else _re.split(r"[\n,;]+", str(raw))):
+        part = str(part).strip()
+        if "<" in part:                      # "Name <email>"
+            items.append(part)
+        else:                                 # one or more bare addresses
+            items += [x for x in part.split() if x]
+    lead = int((ws.playbook or {}).get("lead", 3))
+    today = clock.local_today((ws.settings or {}).get("timezone") or "UTC")
+    cycles = [("wk", 7), ("bi", 14), ("mo", 30)]
+    added, bad, seen = [], [], set()
+    for i, item in enumerate(x for x in items if str(x).strip()):
+        name, _, addr = str(item).strip().rpartition("<")
+        email = ingest.clean_email(addr.rstrip(">") if addr else item)
+        if not email or ingest.undeliverable(email):
+            bad.append(str(item).strip())
+            continue
+        if email in seen:
+            continue
+        seen.add(email)
+        seg, gap = cycles[len(added) % 3]
+        last = today - timedelta(days=gap - min(1, lead))   # due tomorrow -> inside the reminder window
+        first = last - timedelta(days=gap * 5)                # 6 regular orders -> certainty 83%
+        local = email.split("@")[0].replace(".", " ").replace("_", " ")
+        first_name = (name.strip().strip('"').split(" ")[0] if name.strip() else local.split(" ")[0]).title()
+        c = db.scalar(select(Contact).where(Contact.workspace_id == ws.id, Contact.email == email))
+        if c is None:
+            c = Contact(workspace_id=ws.id, email=email, source="test", extra={})
+            db.add(c)
+        c.first = c.first or first_name
+        c.status, c.subscribed, c.unopened_streak = "active", True, 0
+        c.tags = "test"
+        c.extra = {**(c.extra or {}), "test": True, "base": {"first_at": first.isoformat(), "last_at": last.isoformat(), "n": 6}}
+        db.flush()
+        ingest.recompute(db, c)
+        added.append({"email": email, "campaign": seg})
+    if added:
+        db.add(Audit(workspace_id=ws.id, who=user.name or user.email, text=f"Added {len(added)} test people: " + ", ".join(a["email"] for a in added)[:900]))
+    db.commit()
+    return {"added": added, "rejected": bad}
+
+
 @router.patch("/workspaces/{ws_id}/contacts/{cid}")
 def patch_contact(ws_id: int, cid: int, body: dict = Body(...), user: User = Depends(auth.current_user), db: Session = Depends(get_db)):
     auth.require(user, "edit")

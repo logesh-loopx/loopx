@@ -47,8 +47,13 @@ class GuardAgent:
         recent = dict(db.execute(select(Send.contact_id, func.count(Send.id)).where(
             Send.workspace_id == ws.id, Send.status == "sent", Send.sent_at >= week_ago).group_by(Send.contact_id)).all())
         ex_cap = ex_unop = None
+        from ..services.ingest import undeliverable
         for r in rows:
             c = r["pick"].contact
+            if undeliverable(c.email) and not r["pick"].holdout:
+                r["status"], r["hold"] = "held", "Demo address (example.com): it cannot receive email"
+                stats["demo"] += 1
+                continue
             if r["status"] == "held":
                 continue
             if hold_lvl != "off" and recent.get(c.id, 0) >= self.cap:
@@ -59,6 +64,10 @@ class GuardAgent:
                 r["status"], r["hold"] = "held", f"Left the last {c.unopened_streak} emails unopened"
                 stats["unopened"] += 1
                 ex_unop = ex_unop or c
+        if stats["demo"]:
+            ctx.decide("guard", "remove", f"Held {stats['demo']} demo addresses that cannot receive email",
+                       "Addresses at example.com and other reserved test domains are never emailed. Add real people to test sending.",
+                       100, "Always on", payload={"op": "noop"}, level="auto")
         if stats["cap"]:
             ctx.decide("guard", "hold", f"Held {stats['cap']} customers at the weekly limit",
                        f"{first_of(ex_cap)} already had {recent.get(ex_cap.id)} emails in the last 7 days, your limit is {self.cap}.",
