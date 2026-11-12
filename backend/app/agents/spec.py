@@ -166,3 +166,88 @@ def merge(text: str, contact, due: date | None, t: dict) -> str:
     out = out.replace("{date}", fmt_day(due) if due else "this week")
     out = out.replace("{route}", contact.extra.get("route", "your usual route") if contact.extra else "your usual route")
     return tx(out, t)
+
+
+# ---------------------------------------------------------------- the Agents page (settings forms)
+# Same rules and wording as the console's agentSpec. bind: where the value lives
+# ('s' = the agent's main slider, 'cap' = workspace weekly cap, 'holdout' = opt.holdout, None = agents[a].rules[k]).
+AGENT_INFO = {
+    "timing": {"role": "Decides who gets a reminder today, and when.", "color": "n1",
+               "does": ["Works out each customer's buying cycle from their purchase history",
+                        "Adds customers who are due to today's plan, above your certainty rule",
+                        "Picks each customer's send hour from when they open emails",
+                        "Moves reminders around weekends and bank holidays",
+                        "Keeps a holdout group out, so returns caused by email can be measured"],
+               "ai": "AI looks again at customers just under the certainty line and writes a short plan briefing."},
+    "writer": {"role": "Writes and personalises every email.", "color": "n4",
+               "does": ["Fills in names, businesses and next dates", "Shortens long subject lines",
+                        "Runs subject line tests and switches everyone to the winner",
+                        "Holds new or edited emails for a person to review"],
+               "ai": "AI writes a personal subject and first line for each customer. Code rejects any added numbers, offers, links or banned words."},
+    "guard": {"role": "Protects your customers and your sender reputation.", "color": "n6",
+              "does": ["Never emails unsubscribed, bounced or closed customers", "Keeps each customer under the weekly email limit",
+                       "Sends a test wave first and pauses if unsubscribes or bounces pass your limits",
+                       "Stops emailing people who leave several emails unopened"],
+              "ai": "AI reads every new or edited email for misleading or pushy wording and holds risky ones."},
+    "analyst": {"role": "Measures what the emails really change.", "color": "n3",
+                "does": ["Counts opens, clicks, replies, returns and unsubscribes", "Compares emailed customers with the holdout group",
+                         "Flags unusual days", "Sends the weekly report and suggests pausing weak campaigns"],
+                "ai": "AI writes a daily insight and the weekly report. With Tavily it compares you with your industry."},
+    "listener": {"role": "Reads every reply and acts on it.", "color": "n5",
+                 "does": ["Unsubscribes anyone who asks, in any wording", "Marks closed businesses and new email addresses",
+                          "Passes complaints to your team", "Ignores out-of-office replies"],
+                 "ai": "AI understands replies in any language and drafts answers to questions for a person to approve."},
+}
+
+RULE_META: dict[str, list[dict]] = {
+    "timing": [
+        {"k": "certainty", "bind": "s", "type": "range", "label": "Certainty needed before a reminder is sent", "min": 50, "max": 95, "step": 5, "unit": "%",
+         "help": "Customers below this wait until their pattern is clearer."},
+        {"k": "lead", "type": "number", "label": "Days before the due date to remind", "min": 0, "max": 30, "step": 1, "unit": "days"},
+        {"k": "from", "type": "time", "label": "Earliest send time", "help": "Nothing is sent before this, in the customer's time zone."},
+        {"k": "to", "type": "time", "label": "Latest send time"},
+        {"k": "weekend", "type": "toggle", "label": "Send at weekends", "help": "Off: weekend sends move to Monday morning."},
+        {"k": "holidays", "type": "toggle", "label": "Move reminders before bank holidays", "help": "A reminder due on a holiday goes out the working day before."},
+        {"k": "tz", "type": "choice", "label": "Time zone used", "options": [["customer", "Each customer's"], ["client", "The client's"]]},
+    ],
+    "writer": [
+        {"k": "tests", "bind": "s", "type": "range", "label": "Subject lines tested at once", "min": 1, "max": 4, "step": 1, "unit": "",
+         "help": "1 means no test: everyone gets the same subject."},
+        {"k": "split", "type": "range", "label": "Share of a campaign that sees a test", "min": 10, "max": 50, "step": 10, "unit": "%"},
+        {"k": "winner", "type": "number", "label": "Opens before a winner is picked", "min": 20, "max": 5000, "step": 10, "unit": "opens"},
+        {"k": "tone", "type": "choice", "label": "Tone", "options": [["plain", "Plain"], ["friendly", "Friendly"], ["formal", "Formal"]],
+         "help": "Used when the AI personalises emails."},
+        {"k": "maxSubj", "type": "number", "label": "Longest subject line", "min": 30, "max": 90, "step": 5, "unit": "characters"},
+        {"k": "avoid", "type": "text", "label": "Words never to use", "help": "Separate with commas. Emails that use them are held for review."},
+        {"k": "review", "type": "toggle", "label": "Hold new or changed emails for a person to review"},
+    ],
+    "guard": [
+        {"k": "unsub", "bind": "s", "type": "range", "label": "Pause a send when unsubscribes pass", "min": 0.2, "max": 1, "step": 0.1, "unit": "%",
+         "help": "Checked on the test wave before the full send."},
+        {"k": "bounce", "type": "range", "label": "Pause a send when bounces pass", "min": 0.5, "max": 5, "step": 0.5, "unit": "%"},
+        {"k": "cap", "bind": "cap", "type": "number", "label": "Most emails per customer in 7 days", "min": 1, "max": 7, "step": 1, "unit": "emails"},
+        {"k": "wave", "type": "number", "label": "Customers in the test wave", "min": 20, "max": 5000, "step": 10, "unit": "customers",
+         "help": "Smaller plans send their first fifth as the test wave."},
+        {"k": "unopened", "type": "number", "label": "Stop after unopened emails in a row", "min": 2, "max": 10, "step": 1, "unit": "emails"},
+        {"k": "optout", "type": "locked", "label": "Never email opted-out customers"},
+        {"k": "unsublink", "type": "locked", "label": "Every email has an unsubscribe link"},
+    ],
+    "analyst": [
+        {"k": "flag", "bind": "s", "type": "range", "label": "Flag a change larger than", "min": 5, "max": 30, "step": 5, "unit": "%",
+         "help": "Smaller values mean more alerts."},
+        {"k": "holdout", "bind": "holdout", "type": "range", "label": "Holdout group (customers who get no email)", "min": 0, "max": 15, "step": 1, "unit": "%",
+         "help": "Without a holdout, LOOPX cannot tell which returns the emails caused."},
+        {"k": "window", "type": "choice", "label": "Compare against the last", "options": [["7", "7 days"], ["14", "14 days"], ["30", "30 days"]]},
+        {"k": "wReturns", "type": "toggle", "label": "Watch returns"},
+        {"k": "wUnsubs", "type": "toggle", "label": "Watch unsubscribes"},
+        {"k": "day", "type": "choice", "label": "Weekly report day", "options": [["Mon", "Monday"], ["Fri", "Friday"]]},
+    ],
+    "listener": [
+        {"k": "certainty", "bind": "s", "type": "range", "label": "Certainty needed to act on a reply", "min": 60, "max": 95, "step": 5, "unit": "%",
+         "help": "Below this, the reply goes to a person instead."},
+        {"k": "closed", "type": "toggle", "label": "Mark a business as closed when a reply says so"},
+        {"k": "ooo", "type": "toggle", "label": "Ignore out-of-office replies"},
+        {"k": "forward", "type": "text", "label": "Send complaints to (email)", "help": "Empty: the client's owner email."},
+        {"k": "unsubreq", "type": "locked", "label": "Unsubscribe anyone who asks, in any wording"},
+    ],
+}

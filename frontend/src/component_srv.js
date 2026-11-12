@@ -66,6 +66,22 @@ this.srvLoadReport();
 }).catch((e) => this.notify('Could not load this client from the server: ' + e.message));
 }
 
+srvReloadAgents() {
+// the Agents page saved settings on the server: take them into the console too
+const w = this.srvWs();
+if (!w) return;
+this.srvApi('GET', '/workspaces/' + w.sid).then((r) => {
+const W = r.workspace;
+const base = this.baseState().agentsCfg;
+const cfg = {};
+Object.keys(base).forEach((k) => { cfg[k] = Object.assign({}, base[k], (W.agents || {})[k] || {}); });
+const patch = { agentsCfg: cfg, opt: Object.assign({}, this.state.opt, W.opt || {}), cap: W.cap || 2, agentsPaused: !!W.agents_paused };
+this._srvSynced = this.srvCfgKey(Object.assign({}, this.state, patch));
+this.setState(patch);
+this.srvPoll();
+}).catch(() => {});
+}
+
 srvRefreshAll() {
 const w = this.srvWs();
 if (!w) return;
@@ -81,6 +97,7 @@ const w0 = this.srvWs();
 window.LX.currentWs = w0 ? w0.sid : null;
 window.LX.comp = this;
 if (window.LX.showButton) window.LX.showButton(!!(this.state.authed && !this.state.booting), w0 ? '' : this.ws().company);
+if (window.LX.agentsPage) window.LX.agentsPage.sync(this);
 }
 const w = this.srvWs();
 if (!w || this._srvLoaded !== w.sid) return;

@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "design" / "loopx-console-export.html"
 OUT = ROOT / "frontend" / "index.html"
-BRIDGE = (ROOT / "frontend" / "src" / "bridge.js").read_text()
+BRIDGE = (ROOT / "frontend" / "src" / "bridge.js").read_text() + "\n" + (ROOT / "frontend" / "src" / "agents_page.js").read_text()
 METHODS = (ROOT / "frontend" / "src" / "component_srv.js").read_text()
 
 SRV = "this.srvWs()"
@@ -139,6 +139,13 @@ PATCHES: list[tuple[str, str, str]] = [
     ("dashboard: no made-up rate when a campaign has no data",
      "rate: frac > 0 && rs.opened > 0 ? Math.round((segOpen[dc0.id] || 0.5) * 100) + '%' : 'None yet'",
      "rate: frac > 0 && rs.opened > 0 && segOpen[dc0.id] != null ? Math.round(segOpen[dc0.id] * 100) + '%' : 'None yet'"),
+    ("new Agents page for server clients (flag)",
+     "isAgents: st.view === 'agents',",
+     f"isAgents: st.view === 'agents' && !{SRV}, isSrvAgents: st.view === 'agents' && !!{SRV},"),
+    ("new Agents page for server clients (mount point)",
+     '<sc-if value="{{ isAgents }}" hint-placeholder-val="{{ false }}">',
+     '<sc-if value="{{ isSrvAgents }}" hint-placeholder-val="{{ false }}">\n<div id="lx-agents-root"></div>\n</sc-if>\n'
+     '<sc-if value="{{ isAgents }}" hint-placeholder-val="{{ false }}">'),
     # --- static text that only made sense in the design preview ---
     ("login footer",
      "Sample data only. Nothing is sent from this preview.",

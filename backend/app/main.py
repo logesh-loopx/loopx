@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from .config import settings
 from .db import SessionLocal, init_db
-from .routes import api, public
+from .routes import agents_page, api, public
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("loopx")
@@ -61,6 +61,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="LOOPX", version="1.0.0", lifespan=lifespan)
 app.include_router(api.router)
+app.include_router(agents_page.router)
 app.include_router(public.router)
 
 

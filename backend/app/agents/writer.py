@@ -252,8 +252,10 @@ def personalize(ctx: Ctx, plan, max_calls: int = 2) -> int:
             break
         facts = [_facts(db, s) for s in batch]
         t = terms(ws)
+        tone = {"plain": "plain and short, no sales language", "friendly": "warm and friendly, still no hype",
+                "formal": "polite and formal"}.get(str(rule(ws, "writer", "tone")), "plain and short")
         out = ai.structured(
-            f"Business: {ws.name} ({t['label']}). For each email, write:\n"
+            f"Business: {ws.name} ({t['label']}). Tone: {tone}. For each email, write:\n"
             f"- subject: max {w.max_subj} characters, starts with the first name if there is one, no emoji, no hype;\n"
             f"- opening: ONE short sentence (max 25 words) that goes right after 'Hi <name>,' and makes the email "
             f"personal using the facts (for example their usual {t['noun']} or what they bought last). Do not repeat the subject.\n"

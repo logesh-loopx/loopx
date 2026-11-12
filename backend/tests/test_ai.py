@@ -163,3 +163,39 @@ def test_json_from_chatty_models():
     schema = {"type": "object", "required": ["risk"], "properties": {"risk": {"type": "string", "enum": ["low", "high"]}}}
     assert ai.validate({"risk": "medium"}, schema)
     assert ai.validate({"risk": "low"}, schema) == ""
+
+
+def test_agents_page_and_settings(admin):
+    c = admin
+    ws = _make_ws(c)
+    _due_customers(c, ws, n=5)
+    wid = ws["id"]
+    c.post(f"/api/workspaces/{wid}/plan/build")
+    d = c.get(f"/api/workspaces/{wid}/agents").json()
+    assert [a["key"] for a in d["agents"]] == ["timing", "writer", "guard", "analyst", "listener"]
+    t = d["agents"][0]
+    assert t["stats"][0]["value"] == 5 and t["today"] > 0
+    cert = next(r for r in t["rules"] if r["k"] == "certainty")
+    assert cert["value"] == 70
+    # save rules (bound and plain), a permission, extras
+    d = c.patch(f"/api/workspaces/{wid}/agents/timing", json={"rules": {"certainty": 85, "weekend": False, "from": "8:30"},
+                                                               "perms": {"pick": "auto"}, "extras": {"country": "in"}}).json()
+    t = d["agents"][0]
+    vals = {r["k"]: r.get("value") for r in t["rules"]}
+    assert vals["certainty"] == 85 and vals["weekend"] is False and vals["from"] == "08:30"
+    assert next(a for a in t["actions"] if a["k"] == "pick")["level"] == "auto"
+    assert next(e for e in t["extras"] if e["k"] == "country")["value"] == "IN"
+    g = c.patch(f"/api/workspaces/{wid}/agents/guard", json={"rules": {"cap": 99, "unsub": 0.7}}).json()["agents"][2]
+    assert {r["k"]: r.get("value") for r in g["rules"]}["cap"] == 7      # clamped to the allowed range
+    # locked actions cannot be changed
+    c.patch(f"/api/workspaces/{wid}/agents/guard", json={"perms": {"remove": "off"}})
+    g = c.get(f"/api/workspaces/{wid}/agents").json()["agents"][2]
+    assert next(a for a in g["actions"] if a["k"] == "remove")["level"] == "auto"
+    # a new level resets the per-action overrides; switching off
+    t = c.patch(f"/api/workspaces/{wid}/agents/timing", json={"level": "suggest"}).json()["agents"][0]
+    assert next(a for a in t["actions"] if a["k"] == "pick")["level"] == "suggest"
+    t = c.patch(f"/api/workspaces/{wid}/agents/timing", json={"on": False}).json()["agents"][0]
+    assert t["on"] is False and all(a["level"] == "off" for a in t["actions"])
+    audit = c.get(f"/api/workspaces/{wid}/audit").json()["audit"]
+    assert any("Timing agent settings changed" in a["text"] for a in audit)
+    assert c.patch(f"/api/workspaces/{wid}/agents/timing", json={"extras": {"timezone": "Mars/Base"}}).status_code == 400
