@@ -367,3 +367,25 @@ def test_smtp_sender(monkeypatch):
     assert sent["host"] == ("smtp.gmail.com", 587) and sent["tls"] and sent["login"] == ("me@gmail.com", "app-pass")
     assert m["To"] == "priya@acme-office.co" and m["Reply-To"] == "me@gmail.com" and m["List-Unsubscribe"] == "<http://x/u/1>"
     assert mid and m["Message-ID"] == mid
+
+
+def test_undo_closed_gives_the_email_back(admin):
+    c = admin
+    ws = _make_ws(c)
+    _due_customers(c, ws, n=6)
+    wid = ws["id"]
+    c.patch(f"/api/workspaces/{wid}", json={"agents": {"writer": {"rules": {"review": False}}}})
+    c.post(f"/api/workspaces/{wid}/plan/build")   # draft plan: emails are "planned"
+    db = SessionLocal()
+    queued = db.scalar(select(Send).where(Send.workspace_id == wid, Send.status == "planned"))
+    email = queued.contact.email
+    c.post(f"/api/workspaces/{wid}/replies", json={"from": email, "body": "We closed the business last month."})
+    d = db.scalar(select(Decision).where(Decision.workspace_id == wid, Decision.action == "closed"))
+    assert c.post(f"/api/workspaces/{wid}/decisions/{d.id}/approve").status_code == 200
+    db.expire_all()
+    assert db.get(Send, queued.id).status == "skipped"
+    assert c.post(f"/api/workspaces/{wid}/decisions/{d.id}/undo").status_code == 200
+    db.expire_all()
+    assert db.get(Send, queued.id).status == "planned"
+    assert db.get(Contact, queued.contact_id).status == "active"
+    db.close()

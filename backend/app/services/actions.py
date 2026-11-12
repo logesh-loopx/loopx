@@ -117,10 +117,18 @@ def undo_payload(ctx, p: dict) -> str | None:
         if p["status"] == "unsubscribed":
             return None  # an unsubscribe request is always honoured
         c = db.get(Contact, p["contact_id"])
+        restored = 0
         if c:
             c.status = p.get("prev") or "active"
             c.subscribed = c.status == "active" or c.subscribed
-        return f"{c.email if c else 'contact'} back to {c.status if c else ''}"
+            if c.emailable:  # give back the emails the decision cancelled, if today's send is still running
+                for s in db.scalars(select(Send).where(Send.contact_id == c.id, Send.status == "skipped",
+                                                       Send.hold_reason == "Contact no longer emailable", Send.sent_at.is_(None))):
+                    plan = db.get(Plan, s.plan_id) if s.plan_id else None
+                    if plan and plan.status in ("draft", "wave", "sending", "paused"):
+                        s.status, s.hold_reason = ("planned" if plan.status == "draft" else "queued"), ""
+                        restored += 1
+        return f"{c.email if c else 'contact'} back to {c.status if c else ''}" + (f", {restored} email(s) back in today's plan" if restored else "")
     if op == "update_email":
         c = db.get(Contact, p["contact_id"])
         if c and c.email == p["email"]:
