@@ -6,6 +6,7 @@ so an email cannot talk the agent into doing anything else.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime
@@ -15,7 +16,7 @@ from sqlalchemy import select
 from ..models import Contact, Reply, Send
 from ..services import ai, inbox, mailer
 from .base import Ctx, first_of, who_of
-from .spec import level_for, rule
+from .spec import level_for, rule, terms
 
 log = logging.getLogger(__name__)
 
@@ -174,6 +175,8 @@ class ListenerAgent:
                 self._to_person(c, "Out-of-office reply passed to a person", quote, conf)
             return
         if cat in ("positive", "question", "other"):  # a person answers these, whatever the certainty
+            if cat in ("question", "positive") and self._draft_answer(r, c, cat, quote):
+                return
             self._to_person(c, {"positive": "Positive reply passed to a person", "question": "Question passed to a person"}.get(cat, "Reply passed to a person"),
                             quote, conf, "Replies that need an answer go to a person")
             return
@@ -210,6 +213,36 @@ class ListenerAgent:
             ctx.notify(f"Complaint from {who_of(c)}: {r.summary or body[:100]}", "alert")
             return
         self._to_person(c, "Reply passed to a person", quote, conf, "Replies that need an answer go to a person")
+
+    def _draft_answer(self, r: Reply, c: Contact, cat: str, quote: str) -> bool:
+        """AI drafts a short answer from what LOOPX knows about the business; a person approves before it is sent."""
+        ws = self.ctx.ws
+        if not ai.available() or level_for(ws, "listener", "answer") == "off":
+            return False
+        t = terms(ws)
+        pb = ws.playbook or {}
+        known = {"business": ws.name, "what_they_sell": t.get("label"), "website": pb.get("url") or (ws.settings or {}).get("website", ""),
+                 "products": [t.get("p1"), t.get("p2"), t.get("p3")], "about": (pb.get("brief") or "")[:800]}
+        out = ai.structured(
+            f"A customer of {ws.name} replied to a reminder email. Draft a short, friendly answer (max 90 words) signed "
+            f"'The {ws.name} team'. Use ONLY these facts about the business: {json.dumps(known, ensure_ascii=False)}. "
+            "If the facts do not answer their question, say a person from the team will reply soon. Never promise "
+            "prices, refunds, dates or anything not in the facts.\n\n<reply>\n" + r.body[:2500] + "\n</reply>",
+            {"type": "object", "required": ["answer", "needs_person"], "properties": {
+                "answer": {"type": "string"}, "needs_person": {"type": "boolean"}}},
+            tier="default", system=SYSTEM, max_tokens=1200)
+        if not out or not out.get("answer"):
+            return False
+        d = self.ctx.decide("listener", "answer", f"Drafted an answer to {first_of(c)}",
+                            quote + "\n\nDraft answer: " + out["answer"].strip()[:1200], r.conf,
+                            "Answers are sent only after a person approves", contact=c,
+                            payload={"op": "send_answer", "reply_id": r.id, "text": out["answer"].strip()[:2000]})
+        if out.get("needs_person"):
+            self.ctx.notify(f"{who_of(c)} asked something the AI could not answer from what it knows. A draft is waiting.")
+        if d and d.status == "done":  # only if someone set this action to act on its own
+            from ..services.actions import apply_payload
+            apply_payload(self.ctx, d.payload)
+        return True
 
     def _to_person(self, c, title, quote, conf, rule_txt="Below the certainty needed"):
         self.ctx.decide("listener", "info", title, quote, conf, rule_txt, contact=c, status="info")

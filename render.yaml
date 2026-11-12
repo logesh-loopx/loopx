@@ -31,7 +31,13 @@ services:
         sync: false
       - key: IMAP_PASSWORD
         sync: false
-      - key: ANTHROPIC_API_KEY
+      - key: GROQ_API_KEY          # free AI for the agents (or paste keys later in Connections > AI)
+        sync: false
+      - key: GEMINI_API_KEY        # free backup
+        sync: false
+      - key: TAVILY_API_KEY        # free web research
+        sync: false
+      - key: ANTHROPIC_API_KEY     # optional, paid
         sync: false
       - key: ALLOW_SIGNUP
         value: "true"

@@ -157,6 +157,8 @@ class Send(Base):
     token: Mapped[str] = mapped_column(String(64), default=lambda: secrets.token_urlsafe(16), unique=True, index=True)
     message_id: Mapped[str] = mapped_column(String(255), default="")
     error: Mapped[str] = mapped_column(String(500), default="")
+    ai_done: Mapped[bool] = mapped_column(Boolean, default=False)   # Writer personalised it with AI
+    ai_note: Mapped[str] = mapped_column(String(255), default="")
     contact: Mapped[Contact] = relationship()
 
 
@@ -215,6 +217,14 @@ class Notification(Base):
     kind: Mapped[str] = mapped_column(String(20), default="info")  # info | alert | report
     at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     read: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class AppSetting(Base):
+    """Server-wide settings edited in the console (AI providers, Tavily). Overrides .env."""
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class DailyMetric(Base):

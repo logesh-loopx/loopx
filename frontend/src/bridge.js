@@ -90,13 +90,13 @@
 
   function render() {
     var box = document.getElementById('lxp');
-    var tabs = [['status', 'Status'], ['office', 'Office test'], ['plan', "Today's plan"], ['sender', 'Sender'], ['inbox', 'Reply inbox'], ['stores', 'Store connectors'], ['api', 'Events API'], ['import', 'Import file'], ['reply', 'Test a reply'], ['team', 'Team']];
+    var tabs = [['status', 'Status'], ['ai', 'AI'], ['office', 'Office test'], ['plan', "Today's plan"], ['sender', 'Sender'], ['inbox', 'Reply inbox'], ['stores', 'Store connectors'], ['api', 'Events API'], ['import', 'Import file'], ['reply', 'Test a reply'], ['team', 'Team']];
     box.innerHTML = '<header><h2>Connections</h2><button class="btn sec" id="lxp-x" style="margin:0">Close</button></header>' +
       '<div class="tabs">' + tabs.map(function (t) { return '<button class="tab' + (t[0] === tab ? ' on' : '') + '" data-t="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '</div>' +
       '<div class="body" id="lxp-body">Loading…</div>';
     box.querySelector('#lxp-x').onclick = close;
     Array.prototype.forEach.call(box.querySelectorAll('.tab'), function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); render(); }; });
-    ({ status: pStatus, office: pOffice, plan: pPlan, sender: pSender, inbox: pInbox, stores: pStores, api: pApi, import: pImport, reply: pReply, team: pTeam })[tab]();
+    ({ status: pStatus, ai: pAI, office: pOffice, plan: pPlan, sender: pSender, inbox: pInbox, stores: pStores, api: pApi, import: pImport, reply: pReply, team: pTeam })[tab]();
   }
   function body(h) { document.getElementById('lxp-body').innerHTML = h; }
 
@@ -107,7 +107,7 @@
         [['Emails sent today', rs.sent], ['Opened', rs.opened], ['Replies', rs.replied], ['Returned', rs.returned]].map(function (x) { return '<div class="card">' + x[0] + '<b>' + x[1] + '</b></div>'; }).join('') + '</div>' +
         '<h3>Server</h3><table>' +
         '<tr><td>Sending</td><td><span class="pill ' + (H.mail === 'console' ? 'warn' : 'ok') + '">' + esc(H.mail) + '</span> ' + (H.mail === 'console' ? 'Emails are written to data/outbox/outbox.jsonl, not sent. Set MAIL_PROVIDER=brevo or smtp.' : '') + '</td></tr>' +
-        '<tr><td>Claude (AI)</td><td><span class="pill ' + (H.ai ? 'ok' : 'warn') + '">' + (H.ai ? 'on' : 'off') + '</span> ' + (H.ai ? '' : 'Set ANTHROPIC_API_KEY. Without it the agents use rules and no AI text.') + '</td></tr>' +
+        '<tr><td>AI for the agents</td><td><span class="pill ' + (H.ai ? 'ok' : 'warn') + '">' + (H.ai ? 'on: ' + esc((H.aiChain || []).join(' \u2192 ')) : 'off') + '</span> ' + (H.ai ? '' : 'Add a free key on the AI tab (Groq or Gemini). Until then the agents use rules.') + '</td></tr>' +
         '<tr><td>Database</td><td>' + esc(H.db) + '</td></tr>' +
         '<tr><td>Reply inbox</td><td>' + (L.imap ? '<span class="pill ok">connected</span>' : '<span class="pill warn">not set up</span>') + (L.imapError ? ' <span class="err">' + esc(L.imapError) + '</span>' : '') + '</td></tr>' +
         '<tr><td>Daily sending limit left</td><td>' + L.quotaLeft + ' of ' + H.daily_limit + '</td></tr>' +
@@ -257,6 +257,61 @@
         list(); refreshConsole();
       }, function (e) { say('r-m', e.message, 1); });
     };
+  }
+
+  function pAI() {
+    LX.api('GET', '/ai/status').then(function (S) {
+      var why = {
+        groq: 'Free, no card. Fast. Best first choice.',
+        gemini: 'Free Google AI Studio key. Good backup.',
+        openrouter: 'Free \u201c:free\u201d models, about 50 requests a day.',
+        ollama: 'Runs on this computer. No key, no limits; needs a strong PC and Ollama installed.',
+        anthropic: 'Claude. Paid, most capable.'
+      };
+      var rows = S.providers.map(function (p) {
+        var state = p.on ? (p.cooling ? '<span class="pill warn">waiting ' + p.cooling + 's (rate limit)</span>' : '<span class="pill ok">on</span>') : (p.configured ? '<span class="pill">switched off</span>' : '<span class="pill">no key</span>');
+        return '<div class="card" style="margin:10px 0"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:14px">' + esc(p.label) + '</b>' + state + '</div>' +
+          '<small>' + esc(why[p.name] || '') + ' <a href="' + esc(p.signup) + '" target="_blank" rel="noopener">' + (p.keyless ? 'Download' : 'Get a key') + '</a></small>' +
+          '<div class="row" style="margin-top:4px">' +
+          (p.keyless ? '<div><label>Address</label><input data-k="' + p.name + ':base" value="' + esc(p.base) + '"></div>' :
+            '<div><label>API key</label><input data-k="' + p.name + ':key" placeholder="' + (p.keySet ? esc(p.keyHint) + ' (saved)' : 'paste the key') + '"></div>') +
+          '<div><label>Models (fast / smart)</label><div style="display:flex;gap:6px"><input data-k="' + p.name + ':fast" value="' + esc(p.fast) + '"><input data-k="' + p.name + ':smart" value="' + esc(p.smart) + '"></div></div></div>' +
+          '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:6px"><label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" style="width:auto" data-k="' + p.name + ':on"' + (p.on || (!p.configured && !p.keyless) ? ' checked' : '') + '> use it</label>' +
+          '<small>Today: ' + p.usedToday + (p.dailyBudget ? ' of ' + p.dailyBudget + ' requests' : ' requests') + '</small>' +
+          (p.lastError ? '<small class="err">' + esc(p.lastError) + '</small>' : '') +
+          '<button class="btn sec" style="margin:0" data-t="' + p.name + '">Test</button><small id="t-' + p.name + '"></small></div></div>';
+      }).join('');
+      var T = S.tavily;
+      body('<p>The agents use AI to read replies, personalise emails, review wording, pick borderline customers and explain the results. LOOPX tries the providers <b>in this order</b> and moves to the next when one hits its free limit. With none, everything still runs on rules.</p>' + rows +
+        '<h3>Web research: Tavily</h3><div class="card"><small>Free 1,000 credits a month. The Analyst looks up email benchmarks for each client\u2019s industry once a month, and playbook drafting reads the client\u2019s website. <a href="' + esc(T.signup) + '" target="_blank" rel="noopener">Get a key</a></small>' +
+        '<div class="row"><div><label>Tavily API key</label><input id="tv-key" placeholder="' + (T.on ? esc(T.keyHint) + ' (saved)' : 'tvly-...') + '"></div><div><label>Credits to use per month (this month: ' + T.usedThisMonth + ')</label><input id="tv-m" value="' + T.monthlyBudget + '"></div></div>' +
+        '<button class="btn sec" data-t="tavily">Test</button><small id="t-tavily"></small></div>' +
+        '<button class="btn" id="ai-save">Save</button><div id="ai-m"></div>');
+      document.getElementById('ai-save').onclick = function () {
+        var provs = {};
+        Array.prototype.forEach.call(document.querySelectorAll('#lxp [data-k]'), function (el) {
+          var parts = el.getAttribute('data-k').split(':'), n = parts[0], k = parts[1];
+          provs[n] = provs[n] || {};
+          if (k === 'on') provs[n].on = el.checked;
+          else if (el.value.trim() || k !== 'key') provs[n][k] = el.value.trim();
+        });
+        var tv = { monthly: parseInt(val('tv-m'), 10) || 900 };
+        if (val('tv-key').trim()) tv.key = val('tv-key').trim();
+        var was = !!LX.health.ai;
+        LX.api('PUT', '/ai/settings', { providers: provs, tavily: tv }).then(function (st) {
+          LX.health.ai = st.available;
+          say('ai-m', st.available ? 'Saved. AI is on: ' + st.chain.join(' \u2192 ') + '.' + (was ? '' : ' Reloading so Ask LOOPX can use it\u2026') : 'Saved. No provider has a key yet, so the agents keep using rules.');
+          if (!was && st.available) setTimeout(function () { location.reload(); }, 1500); else setTimeout(pAI, 900);
+        }, function (e) { say('ai-m', e.message, 1); });
+      };
+      Array.prototype.forEach.call(document.querySelectorAll('#lxp button[data-t]'), function (b) {
+        if (!b.closest('.card')) return;
+        b.onclick = function () {
+          var n = b.getAttribute('data-t'); say('t-' + n, 'Testing\u2026');
+          LX.api('POST', '/ai/test/' + n).then(function (r) { say('t-' + n, r.ok ? 'Works: \u201c' + r.answer + '\u201d' + (r.seconds ? ' (' + r.seconds + 's)' : '') : r.error, !r.ok); }, function (e) { say('t-' + n, e.message, 1); });
+        };
+      });
+    }, function (e) { body('<p class="err">' + esc(e.message) + '</p>'); });
   }
 
   function pTeam() {

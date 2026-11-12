@@ -6,7 +6,7 @@ from sqlalchemy import select
 from ..models import Contact, Decision, Plan, Reply, Send
 from . import mailer
 
-NOT_UNDOABLE = {"noop", "plan_pick", "forward"}
+NOT_UNDOABLE = {"noop", "plan_pick", "forward", "send_answer", "release_guard"}
 
 
 def apply_payload(ctx, p: dict) -> str:
@@ -70,6 +70,30 @@ def apply_payload(ctx, p: dict) -> str:
         w.pop(p["seg"], None)
         ctx.set_state("winners", w)
         return "new subject added as version B"
+    if op == "release_guard":
+        rv = dict(ctx.state("guard_reviews", {}) or {})
+        if p["seg"] in rv:
+            rv[p["seg"]] = {**rv[p["seg"]], "released": True}
+            ctx.set_state("guard_reviews", rv)
+        for s in db.scalars(select(Send).where(Send.workspace_id == ws.id, Send.seg == p["seg"], Send.status == "held",
+                                               Send.hold_reason == "guard-ai")):
+            plan = db.get(Plan, s.plan_id) if s.plan_id else None
+            s.status = "queued" if plan and plan.status in ("wave", "sending", "approved") else "planned"
+            s.hold_reason = ""
+        return f"emails for {p['seg']} released by a person"
+    if op == "send_answer":
+        r = db.get(Reply, p.get("reply_id"))
+        if not r:
+            return "reply not found"
+        cfg = ws.settings or {}
+        from ..config import settings as S
+
+        mailer.send(mailer.Mail(to=r.from_email, subject=("Re: " + r.subject) if not r.subject.lower().startswith("re:") else r.subject,
+                                text=p["text"], html="<p>" + p["text"].replace("&", "&amp;").replace("<", "&lt;").replace("\n", "<br>") + "</p>",
+                                from_email=cfg.get("from_email") or S.mail_from, from_name=cfg.get("from_name") or ws.name,
+                                reply_to=cfg.get("reply_to") or S.reply_to,
+                                headers={"In-Reply-To": r.message_id, "References": r.message_id} if r.message_id.startswith("<") else {}))
+        return f"answer sent to {r.from_email}"
     if op == "approve_template":
         appr = dict(ctx.state("approved_tpl", {}) or {})
         appr[p["seg"]] = p["hash"]

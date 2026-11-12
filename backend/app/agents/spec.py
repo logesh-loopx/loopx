@@ -44,6 +44,7 @@ ACTIONS: dict[str, dict[str, tuple[str, str, bool]]] = {
         "closed": ("Mark a business as closed", "ask", False),
         "update": ("Update contact details from a reply", "ask", False),
         "forward": ("Pass a complaint to a person", "auto", False),
+        "answer": ("Draft an answer to a customer's question", "suggest", False),
     },
 }
 

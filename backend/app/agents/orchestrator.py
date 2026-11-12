@@ -25,7 +25,7 @@ from .guard import GuardAgent, quota_left
 from .listener import ListenerAgent
 from .spec import is_on, level_for, rule
 from .timing import TimingAgent, learn_send_hours
-from .writer import WriterAgent, template_hash
+from .writer import WriterAgent, personalize, template_hash
 
 log = logging.getLogger(__name__)
 PLAN_OPS = {"plan_pick", "approve_template", "noop"}
@@ -92,6 +92,7 @@ def build_plan(ctx: Ctx, day: date | None = None, force: bool = False) -> Plan:
     if not rows:
         plan.status = "done" if topup else "empty"
         return plan
+    personalize(ctx, plan, max_calls=1)  # the first batch (test wave first); the rest on the next runs
     if level_for(ws, "timing", "pick") == "auto":
         approve_plan(ctx, plan, "Timing agent (acts on its own)")
     else:
@@ -183,6 +184,9 @@ def tick(db, ws: Workspace, now: datetime | None = None, force_plan: bool = Fals
     if force_plan or local.hour >= settings.plan_hour:
         plan = build_plan(ctx)
         out["plan"] = {"id": plan.id, "status": plan.status}
+    # Writer keeps personalising today's emails before they go out (a few AI calls per run)
+    for plan in db.scalars(select(Plan).where(Plan.workspace_id == ws.id, Plan.status.in_(("draft", "wave", "sending")))):
+        out["personalised"] = out.get("personalised", 0) + personalize(ctx, plan, max_calls=3)
     out["sent"] = send_step(ctx)
     if is_on(ws, "writer"):
         w = WriterAgent(ctx)

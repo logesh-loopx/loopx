@@ -7,14 +7,38 @@ The console is the LOOPX design (Claude Design export). It runs against a Python
 | Agent | What it really does |
 |---|---|
 | **Timing** | Reads each customer's purchase history and works out their cycle, due date and certainty, using the same formula the console shows. Builds the day's plan, applies the certainty threshold, sends one reminder per cycle, and leaves out customers who come back without reminders. Learns each customer's send hour from their opens, respects weekends and bank holidays (moving reminders ahead of them), and keeps the holdout group out. |
-| **Writer** | Fills the playbook emails with name, business and next date. Shortens long subjects, blocks emails with empty merge fields or words on the avoid list, and holds edited emails for review. Runs A/B(/C/D) subject tests and picks the winner after N opens. Each week it suggests a better subject for the weakest campaign (Claude). |
+| **Writer** | Fills the playbook emails with name, business and next date. Shortens long subjects, blocks emails with empty merge fields or words on the avoid list, and holds edited emails for review. Runs A/B(/C/D) subject tests and picks the winner after N opens. Each week it suggests a better subject for the weakest campaign (AI). |
 | **Guard** | Never emails unsubscribed, bounced, complained or closed customers. Applies the weekly cap and the unopened-in-a-row stop. Sends a test wave first, checks unsubscribes and bounces, and pauses the send if a limit is passed, with a "Resume?" decision for a person. Enforces the daily sending quota. Every email carries one-click unsubscribe. |
-| **Analyst** | Counts sends, opens, clicks, replies, returns, unsubscribes and bounces per day and per campaign. Compares emailed customers with the holdout group, so the report shows returns *caused* by email. Flags unusual days, writes the weekly report (Claude, or plain figures without it), and suggests pausing weak campaigns. |
-| **Listener** | Reads replies from your reply-to inbox (IMAP). Claude (or rules) sorts each one: unsubscribe, business closed, new address, complaint, out-of-office, bounce, question, positive. Unsubscribes are always honoured. Other actions follow the permission levels, and complaints are forwarded to your team. |
+| **Analyst** | Counts sends, opens, clicks, replies, returns, unsubscribes and bounces per day and per campaign. Compares emailed customers with the holdout group, so the report shows returns *caused* by email. Flags unusual days, writes the weekly report (AI, or plain figures without it), and suggests pausing weak campaigns. |
+| **Listener** | Reads replies from your reply-to inbox (IMAP). The AI (or rules) sorts each one: unsubscribe, business closed, new address, complaint, out-of-office, bounce, question, positive. Unsubscribes are always honoured. Other actions follow the permission levels, and complaints are forwarded to your team. |
 
 Every decision shows its reason, certainty and rule on the **Agents** screen. Each agent's permission level (off / suggest / ask / auto) is respected: *ask* items wait for the daily approval or a person, *suggest* items need a click, and *auto* items happen on their own. Most decisions can be undone. The settings you change in the console (levels, rules, permissions, holdout, weekly cap, pause all) are saved on the server and used on the next run.
 
-**Claude only labels and writes; code decides the actions.** A reply cannot talk the Listener into anything outside its rules.
+**The AI only labels and writes; code decides the actions.** A reply cannot talk the Listener into anything outside its rules.
+
+## AI: free providers
+
+The agents work with any one of these. Paste a key in **Connections → AI** (admins only) and click **Test**:
+
+| Provider | Cost | Notes |
+|---|---|---|
+| **Groq** | Free, no card | Fast. The first choice. Free plans are limited per minute and per day. |
+| **Google Gemini** | Free AI Studio key | Good backup. Free requests per day are lower. |
+| **OpenRouter** | Free `:free` models | About 50 requests a day without credits. |
+| **Ollama** | Free, on your computer | No key and no limits; needs a reasonably strong PC. |
+| **Claude** | Paid | Most capable. |
+
+LOOPX uses them **in order**. It keeps each one under its per-minute and daily limits, and moves to the next when one runs out for the day. If none can answer, the agents fall back to their rules, so nothing stops. The Connections → AI tab shows each provider's use today.
+
+What the AI does in each agent:
+
+- **Timing:** reviews customers just below the certainty line (one call a day) and writes a short plan briefing.
+- **Writer:** writes a personal subject and opening line for each email, from that customer's own history. Code then rejects any AI line that adds numbers, offers, links or words on the avoid list.
+- **Guard:** reviews every new or edited campaign for misleading, pushy or spammy wording (a high risk holds it for a person) and spot-checks personalised emails.
+- **Analyst:** writes a daily insight and the weekly report. With Tavily, it compares results with industry benchmarks once a month.
+- **Listener:** sorts replies in any wording or language and drafts answers to questions. A person approves before an answer is sent.
+
+**Tavily** (web search, free 1,000 credits a month) is optional. The Analyst uses it for benchmarks, and playbook drafting reads the client's website.
 
 ## Run it on your computer
 
@@ -61,7 +85,8 @@ Free web hosts block SMTP ports (Render since Sept 2025; DigitalOcean and Railwa
 | Wake-up + agents | **GitHub Actions** (or cron-job.org) | Repo secrets `LOOPX_URL` and `CRON_SECRET`, plus repo variable `LOOPX_CRON_ENABLED=true`. `.github/workflows/agents-cron.yml` calls `/cron/tick` every 10 minutes. |
 | Replies | Your reply-to mailbox | `IMAP_HOST/USER/PASSWORD` (Gmail: app password), or per client under Connections → Reply inbox |
 | Bounces & spam | Brevo webhook | Brevo → Transactional → Settings → Webhooks → `https://YOUR-URL/webhooks/brevo?secret=CRON_SECRET` (hard bounce, spam, unsubscribed) |
-| AI | Claude API (**not free**, pay as you go) | `ANTHROPIC_API_KEY`. Without it, everything runs on rules. |
+| AI | **Groq** (free) with **Gemini** (free) as backup | Paste the keys in **Connections → AI**, or set `GROQ_API_KEY` / `GEMINI_API_KEY`. Claude is optional (paid). |
+| Web research | **Tavily** (1,000 free credits a month) | `TAVILY_API_KEY`, or paste it in Connections → AI |
 
 Free-tier limits: the Render free service sleeps when idle (the cron wakes it), and Brevo free allows 300 emails a day across all clients (`DAILY_SEND_LIMIT`; Guard holds the rest for the next day). Upgrade either one when you outgrow it. No code changes are needed.
 
@@ -75,7 +100,7 @@ All settings are environment variables; see **`.env.example`** for every one wit
 backend/app/
   agents/      timing.py writer.py guard.py analyst.py listener.py orchestrator.py spec.py
   services/    mailer (console/SMTP/Brevo) · inbox (IMAP) · connectors (Shopify/Stripe/Woo)
-               ingest (CSV, events) · tracking · actions (approve/undo) · ai (Claude)
+               ingest (CSV, events) · tracking · actions (approve/undo) · ai (Groq, Gemini, OpenRouter, Ollama, Claude) · research (Tavily)
   routes/      api.py (console API) · public.py (tracking, unsubscribe, Events API, cron, webhooks)
 frontend/      index.html (built) · src/bridge.js · src/component_srv.js
 design/        the original Claude Design export
@@ -91,7 +116,7 @@ These still use the design's demo behaviour on real clients, or are switched off
 - **New campaign → Launch** (one-off broadcasts) is switched off on real clients. Reminders go out through Today's plan.
 - **Website tracking snippet** (site visits) and **Rehearse the plan** are still the design's demo.
 - The per-customer live activity timeline and the per-campaign split inside Reports use the design's estimates. Totals, rates, the holdout comparison and daily numbers are real.
-- **Ask LOOPX** answers from what the console has loaded, and from Claude when a key is set.
+- **Ask LOOPX** answers from what the console has loaded, and from the AI when a key is set.
 - Settings → Team in the console is the design's version. The real team list and roles are under **Connections → Team**.
 
 ## Tests
